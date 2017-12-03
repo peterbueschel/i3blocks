@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <ctype.h>
 #include <errno.h>
 #include <signal.h>
 #include <stddef.h>
@@ -56,24 +57,39 @@ int block_for_each(const struct block *block,
 	return map_for_each(block->customs, func, data);
 }
 
-static void
-child_setenv(struct block *block, const char *name, const char *value)
+static int child_setenv(const char *name, const char *value, void *data)
 {
-	if (setenv(name, value, 1) == -1) {
-		berrorx(block, "setenv(%s=%s)", name, value);
-		_exit(EXIT_ERR_INTERNAL);
+	static const char * const prefix = "block_";
+	size_t size = strlen(prefix) + strlen(name) + 1;
+	char buf[size];
+	int i, err;
+
+	snprintf(buf, size, "%s%s", prefix, name);
+	for (i = 0; buf[i]; i++)
+		buf[i] = toupper(buf[i]);
+
+	if (!value)
+		value = "";
+
+	if (setenv(buf, value, 1) == -1) {
+		err = -errno;
+		errorx("setenv(%s=%s)", name, value);
+		return err;
 	}
+
+	return 0;
 }
 
 static void
 child_setup_env(struct block *block)
 {
-	child_setenv(block, "BLOCK_NAME", block_get(block, "name") ? : "");
-	child_setenv(block, "BLOCK_INSTANCE", block_get(block, "instance") ? : "");
-	child_setenv(block, "BLOCK_INTERVAL", block_get(block, "interval") ? : "");
-	child_setenv(block, "BLOCK_BUTTON", block_get(block, "button") ? : "");
-	child_setenv(block, "BLOCK_X", block_get(block, "x") ? : "");
-	child_setenv(block, "BLOCK_Y", block_get(block, "y") ? : "");
+	int err;
+
+	err = block_for_each(block, child_setenv, NULL);
+	if (err) {
+		berror(block, "failed to setup environment");
+		_exit(EXIT_ERR_INTERNAL);
+	}
 }
 
 static void
